@@ -24,10 +24,9 @@ def load_user_preferences(preferences_path="user_preferences.json"):
         return {
             "interests": ["AI", "機械学習", "クラウド"],
             "language": "日本語",
-            "news_count": 10,
+            "news_count": 20,
             "target_audience": "エンジニア",
-            "content_depth": "詳細",
-            "date_range": "過去1週間以内"
+            "content_depth": "詳細"
         }
 
     with open(prefs_file, 'r', encoding='utf-8') as f:
@@ -66,19 +65,32 @@ def generate_news_topics_with_grounding(api_key=None):
     # プロンプトを構築
     interests_str = "、".join(prefs['interests'])
 
+    # 現在の日時を取得（JST）
+    from datetime import datetime, timedelta
+    import zoneinfo
+    jst = zoneinfo.ZoneInfo("Asia/Tokyo")
+    now = datetime.now(jst)
+    cutoff_time = now - timedelta(hours=24)
+
     prompt = f"""あなたは技術ニュースキュレーターです。
 以下の条件に基づいて、最新の技術ニュースを{prefs['news_count']}個選定してください。
 
 **対象読者**: {prefs['target_audience']}
 **興味のある分野**: {interests_str}
-**期間**: {prefs['date_range']}
 **言語**: {prefs['language']}
 
+**期間に関する最重要指示（絶対に守ること）**:
+- 必ず過去24時間以内（{cutoff_time.strftime('%Y-%m-%d %H:%M')} JST以降）に公開された最新ニュースのみを選定してください
+- それより古いニュース（1日以上前、昨日より前など）は絶対に含めないでください
+- Google検索では必ず "past 24 hours" または "last day" のフィルタを使用してください
+- 各ニュースの公開日時を必ず確認し、24時間以内であることを検証してください
+
 **重要な指示**:
-1. Google検索を使って、上記の分野に関する最新ニュースを調査してください
+1. Google検索を使って、上記の分野に関する過去24時間以内のニュースのみを調査してください
 2. ニュースは重複しないようにしてください
 3. それぞれのニュースについて、30-50字程度のタイトルと100-150字程度の概要を提供してください
 4. 技術的な深さと正確性を重視してください
+5. 必ず公開日時を YYYY-MM-DD 形式で記録してください
 
 **出力形式**:
 以下のJSON形式で出力してください。JSON以外の文字は一切含めないでください。
@@ -88,12 +100,13 @@ def generate_news_topics_with_grounding(api_key=None):
     {{
       "title": "ニュースのタイトル（30-50字）",
       "summary": "ニュースの概要（100-150字）",
-      "source": "情報源（URLまたはメディア名）"
+      "source": "情報源（URLまたはメディア名）",
+      "published_date": "YYYY-MM-DD"
     }}
   ]
 }}
 
-注意: 出力はJSONのみとし、前置きや説明文は一切含めないでください。"""
+注意: 出力はJSONのみとし、前置きや説明文は一切含めないでください。published_dateは必須です。"""
 
     print("🔍 Geminiグラウンディングでニュースを検索中...")
     print("   (Google検索を使用して最新情報を取得します)")
@@ -152,17 +165,52 @@ def generate_news_topics_with_grounding(api_key=None):
 
             news_list = result["news"]
 
-            print(f"✓ {len(news_list)} 件のニュースを取得しました\n")
+            print(f"✓ {len(news_list)} 件のニュースを取得しました")
+
+            # 24時間以内のニュースのみにフィルタリング
+            from datetime import datetime, timedelta
+            import zoneinfo
+            jst = zoneinfo.ZoneInfo("Asia/Tokyo")
+            now = datetime.now(jst)
+            cutoff_date = (now - timedelta(hours=24)).date()
+
+            filtered_news = []
+            for news in news_list:
+                if 'published_date' not in news:
+                    print(f"⚠️  日付情報なし（スキップ）: {news['title']}")
+                    continue
+
+                try:
+                    pub_date = datetime.strptime(news['published_date'], '%Y-%m-%d').date()
+                    if pub_date >= cutoff_date:
+                        filtered_news.append(news)
+                    else:
+                        print(f"⚠️  24時間以内でない（スキップ）: {news['title']} ({news['published_date']})")
+                except ValueError:
+                    print(f"⚠️  日付形式が不正（スキップ）: {news['title']} ({news['published_date']})")
+                    continue
+
+            print(f"✓ 24時間フィルタ後: {len(filtered_news)} 件\n")
+
+            # 日付でソートして新しい順に並べる
+            filtered_news.sort(key=lambda x: x['published_date'], reverse=True)
+
+            # 11個以上ある場合は最新10個のみを選択
+            if len(filtered_news) >= 11:
+                filtered_news = filtered_news[:10]
+                print(f"✓ 最新10件を選択しました\n")
 
             # 取得したニュースを表示
-            for i, news in enumerate(news_list, 1):
+            for i, news in enumerate(filtered_news, 1):
                 print(f"[{i}] {news['title']}")
                 print(f"    {news['summary']}")
                 if 'source' in news and news['source']:
                     print(f"    出典: {news['source']}")
+                if 'published_date' in news:
+                    print(f"    公開日: {news['published_date']}")
                 print()
 
-            return news_list
+            return filtered_news
 
         except json.JSONDecodeError as e:
             print(f"⚠️  JSONパースエラー (試行 {attempt + 1}/{max_retries}): {e}")
