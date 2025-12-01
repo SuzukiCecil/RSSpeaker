@@ -21,6 +21,11 @@ fi
 
 source venv/bin/activate
 
+# .envファイルを読み込む
+if [ -f ".env" ]; then
+    export $(grep -v '^#' .env | xargs)
+fi
+
 # 最新の記事ディレクトリを探す
 LATEST_DIR=$(ls -td data/*/ 2>/dev/null | head -1)
 if [ -z "$LATEST_DIR" ]; then
