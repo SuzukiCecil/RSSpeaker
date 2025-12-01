@@ -23,9 +23,17 @@ source venv/bin/activate
 
 # .envファイルを読み込む
 if [ -f ".env" ]; then
-    set -a
-    source <(cat .env | sed 's/#.*$//' | grep -v '^$')
-    set +a
+    while IFS='=' read -r key value; do
+        # コメント行と空行をスキップ
+        [[ "$key" =~ ^#.*$ ]] && continue
+        [[ -z "$key" ]] && continue
+        # インラインコメントを削除
+        value="${value%%#*}"
+        # 前後の空白を削除
+        value=$(echo "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+        # 環境変数としてエクスポート
+        export "$key=$value"
+    done < .env
 fi
 
 # 最新の記事ディレクトリを探す
