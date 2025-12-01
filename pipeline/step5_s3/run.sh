@@ -8,9 +8,19 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 cd "$PROJECT_ROOT"
 
-# .envファイルから環境変数を読み込む
+# .envファイルを読み込む
 if [ -f ".env" ]; then
-    export $(grep -v '^#' .env | xargs)
+    while IFS='=' read -r key value; do
+        # コメント行と空行をスキップ
+        [[ "$key" =~ ^#.*$ ]] && continue
+        [[ -z "$key" ]] && continue
+        # インラインコメントを削除
+        value="${value%%#*}"
+        # 前後の空白を削除
+        value=$(echo "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+        # 環境変数としてエクスポート
+        export "$key=$value"
+    done < .env
 fi
 
 # デフォルト値を設定
