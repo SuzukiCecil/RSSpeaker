@@ -88,7 +88,7 @@ def generate_audio_with_chunking(text, output_path, speaker_id=SPEAKER_ID):
         query_response = requests.post(
             f"{VOICEVOX_URL}/audio_query",
             params={"text": chunk, "speaker": speaker_id},
-            timeout=30
+            timeout=60
         )
         query_response.raise_for_status()
 
