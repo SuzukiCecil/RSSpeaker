@@ -24,7 +24,7 @@ source venv/bin/activate
 # .envファイルを読み込む
 if [ -f ".env" ]; then
     set -a
-    source <(grep -v '^#' .env | grep -v '^$')
+    source <(cat .env | sed 's/#.*$//' | grep -v '^$')
     set +a
 fi
 
