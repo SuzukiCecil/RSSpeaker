@@ -23,7 +23,9 @@ source venv/bin/activate
 
 # .envファイルを読み込む
 if [ -f ".env" ]; then
-    export $(grep -v '^#' .env | xargs)
+    set -a
+    source <(grep -v '^#' .env | grep -v '^$')
+    set +a
 fi
 
 # 最新の記事ディレクトリを探す
