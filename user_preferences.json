@@ -1,0 +1,16 @@
+{
+  "interests": [
+    "人工知能（AI）",
+    "機械学習",
+    "大規模言語モデル（LLM）",
+    "開発者ツール",
+    "PHP言語",
+    "Laravel",
+    "ソフトウェア開発手法"
+  ],
+  "language": "日本語",
+  "news_count": 10,
+  "target_audience": "エンジニア・技術者",
+  "content_depth": "詳細な技術解説を含む",
+  "date_range": "過去2日以内"
+}

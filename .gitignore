@@ -1,0 +1,46 @@
+# 仮想環境
+venv/
+venv.backup/
+.venv/
+ENV/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# データとアウトプット
+data/
+output*/
+backup/
+*.wav
+
+# JSONファイルは基本的に除外するが、設定ファイルは含める
+*.json
+!user_preferences.json
+!.env.example
+
+# ログ
+*.log
+
+# 環境変数
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code
+.claude/
+
+# macOS
+.DS_Store
+
+# AWS
+.aws/
