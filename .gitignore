@@ -44,3 +44,7 @@ backup/
 
 # AWS
 .aws/
+
+# Credentials
+.credential/
+*.csv

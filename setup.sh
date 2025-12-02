@@ -6,6 +6,28 @@ set -e
 echo "RSSpeaker環境セットアップを開始します"
 echo "=========================================="
 
+# システムパッケージのインストール（Ubuntu/Debian）
+if [ -f /etc/debian_version ]; then
+    echo "システムパッケージをインストール中..."
+    sudo apt update
+    sudo apt install -y python3-venv python3-pip unzip curl
+    echo "✓ システムパッケージをインストールしました"
+fi
+
+# AWS CLI v2のインストール確認
+if ! command -v aws &> /dev/null; then
+    echo "AWS CLI v2をインストール中..."
+    cd /tmp
+    curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    unzip -q awscliv2.zip
+    sudo ./aws/install
+    rm -rf aws awscliv2.zip
+    cd - > /dev/null
+    echo "✓ AWS CLI v2をインストールしました"
+else
+    echo "✓ AWS CLI は既にインストールされています ($(aws --version))"
+fi
+
 # Python3のバージョン確認
 echo "Python3のバージョン確認..."
 python3 --version
