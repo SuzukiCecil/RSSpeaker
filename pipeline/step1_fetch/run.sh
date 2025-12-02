@@ -1,5 +1,5 @@
 #!/bin/bash
-# Step 1: Geminiグラウンディングでニュース概要生成
+# Step 1: Google Custom Search APIでニュース概要生成
 
 set -e
 
@@ -24,8 +24,8 @@ source venv/bin/activate
 # dataディレクトリ作成
 mkdir -p data
 
-# Geminiグラウンディングでニュース概要生成
-python3 pipeline/step1_fetch/generate_news_topics.py || exit 1
+# Google Custom Search APIでニュース概要生成
+python3 pipeline/step1_fetch/generate_news_topics_search.py || exit 1
 
 # 最新のtopics.jsonを確認
 LATEST_DIR=$(ls -td data/*/ 2>/dev/null | head -1)

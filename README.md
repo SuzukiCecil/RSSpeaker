@@ -7,8 +7,8 @@ Gemini AIでユーザーの興味に合わせた最新技術ニュースを生�
 ```
 ホストOS（EC2 Ubuntu）
 ├── Python仮想環境（venv/）
-│   ├── Geminiグラウンディング（Google検索でニュース生成）
-│   ├── Geminiナレーション生成（並列処理）
+│   ├── Google Custom Search API（最新ニュース検索）
+│   ├── Gemini（要約・ナレーション生成、並列処理）
 │   ├── 音声生成（HTTPでVOICEVOXに接続）
 │   ├── S3アップロード
 │   └── Podcast RSS生成
@@ -38,6 +38,12 @@ cd /path/to/RSSpeaker
 
 ### 2. ユーザー設定（user_preferences.json）
 
+初回は`user_preferences.json.example`をコピーして`user_preferences.json`を作成してください：
+
+```bash
+cp user_preferences.json.example user_preferences.json
+```
+
 `user_preferences.json`でニュース生成の設定をカスタマイズできます：
 
 ```json
@@ -49,21 +55,31 @@ cd /path/to/RSSpeaker
     "開発者ツール",
     "PHP言語",
     "Laravel",
-    "ソフトウェア開発手法"
+    "ソフトウェア開発手法",
+    "クラウドサービス",
+    "Web開発",
+    "オープンソース",
+    "セキュリティ",
+    "データベース技術",
+    "DevOps",
+    "React",
+    "Node.js"
   ],
   "language": "日本語",
   "news_count": 10,
+  "search_query_count": 10,
   "target_audience": "エンジニア・技術者",
-  "content_depth": "詳細な技術解説を含む",
-  "date_range": "過去2日以内"
+  "content_depth": "詳細な技術解説を含む"
 }
 ```
 
 - **interests**: 興味のある技術分野（配列で複数指定可能）
 - **news_count**: 生成するニュース数（デフォルト: 10）
+- **search_query_count**: Google検索クエリ数（デフォルト: 10）
 - **target_audience**: 対象読者層
 - **content_depth**: コンテンツの詳細度
-- **date_range**: 対象期間
+
+**注意**: `user_preferences.json`は`.gitignore`に含まれており、個人設定として管理されます。
 
 ### 3. 環境変数設定（.envファイル）
 
@@ -78,6 +94,10 @@ cp .env.example .env
 ```bash
 # Gemini API Key（必須）
 GEMINI_API_KEY=your-gemini-api-key-here
+
+# Google Custom Search API（必須）
+GOOGLE_SEARCH_API_KEY=your-google-search-api-key-here
+GOOGLE_SEARCH_CX=your-custom-search-engine-id-here
 
 # S3 Bucket（デフォルト値が設定済み、変更可能）
 S3_BUCKET_NAME=rsspeaker-audio-files
@@ -119,7 +139,7 @@ VOICEVOXは音声合成エンジンで、HTTPリクエストで音声生成を�
 ### ステップごとに実行（テスト・デバッグ用）
 
 ```bash
-# Step 1: Geminiグラウンディングでニュース生成
+# Step 1: Google Custom Search APIでニュース検索
 ./pipeline/step1_fetch/run.sh
 
 # Step 2: Geminiで詳細ナレーション生成
@@ -140,11 +160,15 @@ VOICEVOXは音声合成エンジンで、HTTPリクエストで音声生成を�
 
 ## パイプライン処理フロー
 
-1. **Geminiグラウンディング** (`pipeline/step1_fetch/run.sh`)
-   - **Google検索グラウンディング**: Gemini API (gemini-2.5-flash) でGoogle検索を使用し、最新ニュースを取得
-   - **ユーザー設定ベース**: `user_preferences.json`で指定した興味分野・期間に基づいてニュースを生成
-   - ニュース重複を防止し、10件のニュース概要を生成
-   - 出力: `data/YYYYMMDD_HHMMSS/topics.json`
+1. **Google Custom Search API** (`pipeline/step1_fetch/run.sh`)
+   - **検索クエリ生成**: Gemini API (gemini-2.5-flash) で`user_preferences.json`の興味分野から10個の検索クエリを生成
+   - **最新ニュース検索**: Google Custom Search APIで過去24時間以内のニュースを検索（`dateRestrict=d1`パラメータ使用）
+   - **要約生成**: 検索結果のsnippetを基にGeminiが200-300字の要約を生成（幻覚を防止）
+   - **重複防止**: 同一ニュースの重複を自動的に排除
+   - **日付フィルタリング**: 24時間以内のニュースのみを厳密にフィルタリング
+   - 出力: `data/YYYYMMDD_HHMMSS/topics.json`（10件のニュース概要）
+
+   **重要**: Google Custom Search APIは1日100クエリまで無料。10クエリ × 各10件 = 最大100件の検索結果から10件を選定。
 
 2. **Gemini詳細ナレーション生成** (`pipeline/step2_summarize/run.sh`)
    - **並列処理**: 10件のニュース概要を同時に処理（デフォルト5並列、GEMINI_MAX_WORKERSで調整可能）
@@ -191,8 +215,8 @@ RSSpeaker/
 │
 ├── pipeline/                          # パイプラインステップディレクトリ
 │   ├── step1_fetch/
-│   │   ├── run.sh                     # ニュース生成実行スクリプト
-│   │   └── generate_news_topics.py    # Geminiグラウンディングでニュース生成
+│   │   ├── run.sh                     # ニュース検索実行スクリプト
+│   │   └── generate_news_topics_search.py  # Google Custom Search APIでニュース検索
 │   │
 │   ├── step2_summarize/
 │   │   ├── run.sh                     # ナレーション生成実行スクリプト
@@ -215,7 +239,7 @@ RSSpeaker/
 ├── venv/                              # Python仮想環境（自動生成）
 ├── data/                              # ニュースデータ（自動生成）
 │   └── YYYYMMDD_HHMMSS/               # タイムスタンプごとのディレクトリ
-│       ├── topics.json                # Geminiグラウンディング生成結果
+│       ├── topics.json                # Google Custom Search API検索結果
 │       └── summarized.json            # Gemini詳細ナレーション結果
 └── output/                            # 音声ファイル（自動生成）
     └── YYYYMMDD_HHMMSS/               # タイムスタンプごとのディレクトリ
@@ -234,10 +258,13 @@ python-dotenv==1.0.0
 
 ## 技術的特徴
 
-### Geminiグラウンディング機能
-- Google検索を活用して最新のニュース情報を取得
-- RSSフィードに依存せず、常に最新情報にアクセス可能
-- ユーザーの興味分野に特化したニュース生成
+### Google Custom Search API統合
+- **過去24時間限定検索**: `dateRestrict=d1`パラメータで確実に最新ニュースのみ取得
+- **幻覚防止アーキテクチャ**: 検索結果snippetのみから要約生成し、Geminiの幻覚を防止
+- **2段階処理**: Geminiで検索クエリ生成 → Custom Search APIで検索 → Geminiで要約生成
+- **RSSフィード不要**: 直接Google検索から最新情報を取得
+- **ユーザーカスタマイズ**: `user_preferences.json`で興味分野を自由に設定可能
+- **無料枠内運用**: 1日100クエリまで無料（1日1回実行で10クエリ使用）
 
 ### 並列処理による高速化
 - **Step2**: 10件のナレーション生成を5並列で処理（Gemini API）

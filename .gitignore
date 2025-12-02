@@ -18,9 +18,9 @@ output*/
 backup/
 *.wav
 
-# JSONファイルは基本的に除外するが、設定ファイルは含める
+# JSONファイルは基本的に除外するが、設定ファイルのexampleは含める
 *.json
-!user_preferences.json
+!user_preferences.json.example
 !.env.example
 
 # ログ

@@ -1,14 +1,22 @@
 #!/usr/bin/env python3
 """
-Geminiグラウンディング機能でニュース概要を生成
+Gemini + Google Custom Search APIでニュース概要を生成
+シンプルな2段階アプローチ：
+1. Geminiに検索クエリを生成させる
+2. Custom Search APIで実際に検索
+3. 検索結果をGeminiに渡してJSON整形
 """
 import os
 import json
 import sys
 import time
-from datetime import datetime
+import requests
+from datetime import datetime, timedelta
 from pathlib import Path
 from dotenv import load_dotenv
+import zoneinfo
+
+# Google GenAI SDK
 import google.generativeai as genai
 
 # プロジェクトルートの.envファイルを読み込む
@@ -32,18 +40,38 @@ def load_user_preferences(preferences_path="user_preferences.json"):
     with open(prefs_file, 'r', encoding='utf-8') as f:
         return json.load(f)
 
-def generate_news_topics_with_grounding(api_key=None):
-    """
-    Geminiグラウンディング機能でニュース概要を生成
+def google_custom_search(query, api_key, cx, num=10):
+    """Google Custom Search APIで検索"""
+    url = "https://www.googleapis.com/customsearch/v1"
+    params = {
+        "key": api_key,
+        "cx": cx,
+        "q": query,
+        "num": num,
+        "dateRestrict": "d1",  # 過去1日以内
+    }
 
-    Returns:
-        list: ニュース概要のリスト [{"title": ..., "summary": ...}, ...]
-    """
+    try:
+        response = requests.get(url, params=params, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        print(f"⚠️  検索エラー: {e}")
+        return {"items": []}
+
+def generate_news_topics(api_key=None):
+    """ニュース概要を生成"""
     if api_key is None:
         api_key = os.getenv("GEMINI_API_KEY")
 
     if not api_key:
         raise ValueError("Gemini APIキーが設定されていません。")
+
+    search_api_key = os.getenv("GOOGLE_SEARCH_API_KEY")
+    search_cx = os.getenv("GOOGLE_SEARCH_CX")
+
+    if not search_api_key or not search_cx:
+        raise ValueError("Google Custom Search API の設定が不足しています。")
 
     # ユーザー設定を読み込む
     prefs = load_user_preferences()
@@ -55,103 +83,101 @@ def generate_news_topics_with_grounding(api_key=None):
     print()
 
     genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(model_name='gemini-2.5-flash')
 
-    # グラウンディング機能付きモデルを設定
-    # gemini-2.5-flashでGoogle検索グラウンディングを使用
-    model = genai.GenerativeModel(
-        model_name='gemini-2.5-flash'
-    )
-
-    # プロンプトを構築
+    # 検索クエリを生成
     interests_str = "、".join(prefs['interests'])
+    query_count = prefs.get('search_query_count', 10)  # デフォルトは10
 
-    # 現在の日時を取得（JST）
-    from datetime import datetime, timedelta
-    import zoneinfo
+    query_prompt = f"""以下の分野に関する過去24時間以内の最新技術ニュースを検索するための、効果的な日本語検索クエリを{query_count}個生成してください。
+
+興味のある分野: {interests_str}
+
+各クエリは1行で、簡潔に（3-10ワード）してください。
+多様な観点からニュースを探せるよう、異なる切り口のクエリを生成してください。
+クエリのみを出力し、説明は不要です。"""
+
+    print("🔍 検索クエリを生成中...")
+    response = model.generate_content(query_prompt)
+    search_queries = [q.strip() for q in response.text.strip().split('\n') if q.strip()]
+
+    print(f"✓ 生成されたクエリ:")
+    for i, q in enumerate(search_queries, 1):
+        print(f"  {i}. {q}")
+    print()
+
+    # 各クエリで検索実行
+    all_results = []
+    for query in search_queries:
+        print(f"🔍 検索中: {query}")
+        results = google_custom_search(query, search_api_key, search_cx, num=10)
+
+        if 'items' in results:
+            for item in results['items']:
+                all_results.append({
+                    "title": item.get("title", ""),
+                    "snippet": item.get("snippet", ""),
+                    "link": item.get("link", ""),
+                    "source_query": query
+                })
+        time.sleep(1)  # レート制限対策
+
+    print(f"✓ 合計 {len(all_results)} 件の検索結果を取得\n")
+
+    if not all_results:
+        print("⚠️  検索結果が見つかりませんでした。")
+        return []
+
+    # Geminiに詳細要約を生成させる
     jst = zoneinfo.ZoneInfo("Asia/Tokyo")
     now = datetime.now(jst)
     cutoff_time = now - timedelta(hours=24)
 
-    prompt = f"""あなたは技術ニュースキュレーターです。
-以下の条件に基づいて、最新の技術ニュースを{prefs['news_count']}個選定してください。
+    formatting_prompt = f"""以下の検索結果から、過去24時間以内（{cutoff_time.strftime('%Y-%m-%d %H:%M')} JST以降）に公開された技術ニュースを{prefs['news_count']}個選定し、JSON形式で出力してください。
 
-**対象読者**: {prefs['target_audience']}
-**興味のある分野**: {interests_str}
-**言語**: {prefs['language']}
+検索結果:
+{json.dumps(all_results[:20], ensure_ascii=False, indent=2)}
 
-**期間に関する最重要指示（絶対に守ること）**:
-- 必ず過去24時間以内（{cutoff_time.strftime('%Y-%m-%d %H:%M')} JST以降）に公開された最新ニュースのみを選定してください
-- それより古いニュース（1日以上前、昨日より前など）は絶対に含めないでください
-- Google検索では必ず "past 24 hours" または "last day" のフィルタを使用してください
-- 各ニュースの公開日時を必ず確認し、24時間以内であることを検証してください
+要件:
+- 実在する確認可能なニュースのみ
+- 架空のニュース、製品名は含めない
+- タイトル: 30-50字
+- 要約（summary）: 検索結果のsnippetを基に、事実のみを記載した要約を200-300字で作成
+  * snippetの情報のみを使用すること
+  * 推測や補足は一切含めないこと
+  * 具体的な技術名、数値、事実を重視すること
+- 日付: YYYY-MM-DD形式（検索結果から推定）
+- ソース: 完全なURL
 
-**重要な指示**:
-1. Google検索を使って、上記の分野に関する過去24時間以内のニュースのみを調査してください
-2. ニュースは重複しないようにしてください
-3. それぞれのニュースについて、30-50字程度のタイトルと100-150字程度の概要を提供してください
-4. 技術的な深さと正確性を重視してください
-5. 必ず公開日時を YYYY-MM-DD 形式で記録してください
-
-**出力形式**:
-以下のJSON形式で出力してください。JSON以外の文字は一切含めないでください。
-
+出力形式:
 {{
   "news": [
     {{
-      "title": "ニュースのタイトル（30-50字）",
-      "summary": "ニュースの概要（100-150字）",
-      "source": "情報源（URLまたはメディア名）",
+      "title": "...",
+      "summary": "検索結果のsnippetに基づく500-800字の詳細要約",
+      "source": "https://...",
       "published_date": "YYYY-MM-DD"
     }}
   ]
 }}
 
-注意: 出力はJSONのみとし、前置きや説明文は一切含めないでください。published_dateは必須です。"""
+JSON以外の文字は一切含めないでください。"""
 
-    print("🔍 Geminiグラウンディングでニュースを検索中...")
-    print("   (Google検索を使用して最新情報を取得します)")
-    print()
-
+    print("📝 検索結果をGeminiで整形中...")
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            # gemini-2.5系でのグラウンディング設定
-            # SDKアップグレード後、google_searchフィールドを使用
-            from google.ai.generativelanguage_v1beta.types import Tool
-
-            # Google検索を使ったグラウンディング設定
-            # google_searchフィールドに空のdictを渡すことで有効化
-            google_search_tool = Tool(google_search={})
-
             response = model.generate_content(
-                prompt,
+                formatting_prompt,
                 generation_config=genai.types.GenerationConfig(
                     temperature=0.7,
-                    max_output_tokens=8000,  # ニュース10件のJSON生成に十分な容量
-                ),
-                tools=[google_search_tool]
+                    max_output_tokens=16000,
+                )
             )
 
-            # レスポンスの確認
-            if not response.candidates:
-                print(f"⚠️  レスポンスにcandidatesが含まれていません")
-                print(f"    response: {response}")
-                raise ValueError("レスポンスが空です")
-
-            # finish_reasonを確認
-            finish_reason = response.candidates[0].finish_reason
-            if finish_reason != 1:  # 1 = STOP (正常終了)
-                print(f"⚠️  異常な終了理由: finish_reason = {finish_reason}")
-                print(f"    (1=STOP, 2=MAX_TOKENS, 3=SAFETY, 4=RECITATION, 5=OTHER)")
-                if finish_reason == 3:  # SAFETY
-                    print(f"    安全フィルターによりブロックされました")
-                    if hasattr(response.candidates[0], 'safety_ratings'):
-                        print(f"    safety_ratings: {response.candidates[0].safety_ratings}")
-
-            # レスポンスからテキストを取得
             response_text = response.text.strip()
 
-            # JSON部分を抽出（前後の余分なテキストを除去）
+            # JSON部分を抽出
             if "```json" in response_text:
                 response_text = response_text.split("```json")[1].split("```")[0].strip()
             elif "```" in response_text:
@@ -164,20 +190,15 @@ def generate_news_topics_with_grounding(api_key=None):
                 raise ValueError("レスポンスに'news'キーが含まれていません")
 
             news_list = result["news"]
-
             print(f"✓ {len(news_list)} 件のニュースを取得しました")
 
-            # 24時間以内のニュースのみにフィルタリング
-            from datetime import datetime, timedelta
-            import zoneinfo
-            jst = zoneinfo.ZoneInfo("Asia/Tokyo")
-            now = datetime.now(jst)
+            # 24時間フィルタリング
             cutoff_date = (now - timedelta(hours=24)).date()
-
             filtered_news = []
+
             for news in news_list:
                 if 'published_date' not in news:
-                    print(f"⚠️  日付情報なし（スキップ）: {news['title']}")
+                    print(f"⚠️  日付情報なし（スキップ）: {news.get('title', 'No Title')}")
                     continue
 
                 try:
@@ -192,13 +213,13 @@ def generate_news_topics_with_grounding(api_key=None):
 
             print(f"✓ 24時間フィルタ後: {len(filtered_news)} 件\n")
 
-            # 日付でソートして新しい順に並べる
+            # ソート
             filtered_news.sort(key=lambda x: x['published_date'], reverse=True)
 
-            # 11個以上ある場合は最新10個のみを選択
-            if len(filtered_news) >= 11:
-                filtered_news = filtered_news[:10]
-                print(f"✓ 最新10件を選択しました\n")
+            # 最新N件を選択
+            if len(filtered_news) > prefs['news_count']:
+                filtered_news = filtered_news[:prefs['news_count']]
+                print(f"✓ 最新{prefs['news_count']}件を選択しました\n")
 
             # 取得したニュースを表示
             for i, news in enumerate(filtered_news, 1):
@@ -225,7 +246,6 @@ def generate_news_topics_with_grounding(api_key=None):
 
         except Exception as e:
             error_message = str(e)
-
             if "429" in error_message or "Resource exhausted" in error_message:
                 if attempt < max_retries - 1:
                     print(f"⏳ レート制限に達しました。60秒待機してリトライします... (試行 {attempt + 1}/{max_retries})")
@@ -241,17 +261,7 @@ def generate_news_topics_with_grounding(api_key=None):
     raise RuntimeError("ニュース取得に失敗しました")
 
 def save_news_topics(news_list, output_dir="data"):
-    """
-    ニュース概要をJSONファイルに保存
-
-    Args:
-        news_list: ニュース概要のリスト
-        output_dir: 出力ディレクトリ
-
-    Returns:
-        str: 保存したファイルのパス
-    """
-    # タイムスタンプディレクトリを作成
+    """ニュース概要をJSONファイルに保存"""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     timestamp_dir = Path(output_dir) / timestamp
     timestamp_dir.mkdir(parents=True, exist_ok=True)
@@ -266,13 +276,13 @@ def save_news_topics(news_list, output_dir="data"):
     return str(output_file)
 
 if __name__ == "__main__":
-    print("RSSpeaker - Geminiグラウンディングでニュース概要生成")
+    print("RSSpeaker - Gemini + Google Custom Searchでニュース概要生成")
     print("=" * 60)
     print()
 
     try:
         # ニュース概要を生成
-        news_list = generate_news_topics_with_grounding()
+        news_list = generate_news_topics()
 
         # 保存
         output_file = save_news_topics(news_list)

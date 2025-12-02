@@ -6,10 +6,19 @@
     "開発者ツール",
     "PHP言語",
     "Laravel",
-    "ソフトウェア開発手法"
+    "ソフトウェア開発手法",
+    "クラウドサービス",
+    "Web開発",
+    "オープンソース",
+    "セキュリティ",
+    "データベース技術",
+    "DevOps",
+    "React",
+    "Node.js"
   ],
   "language": "日本語",
-  "news_count": 20,
+  "news_count": 10,
+  "search_query_count": 10,
   "target_audience": "エンジニア・技術者",
   "content_depth": "詳細な技術解説を含む"
 }
