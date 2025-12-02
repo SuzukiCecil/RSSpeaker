@@ -111,9 +111,9 @@ PODCAST_EMAIL=podcast@example.com
 
 # 並列処理設定
 GEMINI_MAX_WORKERS=5          # Geminiナレーション生成の並列数（デフォルト: 5）
-VOICEVOX_MAX_WORKERS=2        # 音声生成の並列数（デフォルト: 2）
-# t3.medium (2 vCPU): 2を推奨
-# c7i.xlarge (4 vCPU): 4を推奨
+VOICEVOX_MAX_WORKERS=3        # 音声生成の並列数（推奨: 3）
+# t3.medium (2 vCPU, 4GB RAM): VOICEVOX_MAX_WORKERS=1（メモリ不足のため2並列は不可）
+# c7i.xlarge (4 vCPU, 8GB RAM): VOICEVOX_MAX_WORKERS=3推奨（安全マージン考慮）
 ```
 
 **重要**: `.env`ファイルは`.gitignore`に含まれており、Gitで管理されません。APIキーなどの機密情報は安全に保管されます。
